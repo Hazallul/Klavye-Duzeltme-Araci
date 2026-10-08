@@ -25,7 +25,7 @@ static class EndToEnd
             new("noktalama", () => Type("Merhab. "), "tamam nasılsın Merhaba. "),
             new("hızlı yazım (tek seferde)", () => { Burst("gelyorum okulda "); return Task.CompletedTask; }, "tamam nasılsın Merhaba. geliyorum okulda "),
             new("Backspace ile geri alma", async () => { await Type("okuldaa "); Press(0x08); }, "tamam nasılsın Merhaba. geliyorum okulda okuldaa"),
-            new("öğrenilen kelime", () => Type(" okuldaa "), "tamam nasılsın Merhaba. geliyorum okulda okuldaa okuldaa "),
+            new("geri alınan kelime oturumda düzeltilmez", () => Type(" okuldaa "), "tamam nasılsın Merhaba. geliyorum okulda okuldaa okuldaa "),
             new("adres/e-posta", () => Type("site.temam/x temam@posta "), "tamam nasılsın Merhaba. geliyorum okulda okuldaa okuldaa site.temam/x temam@posta "),
             new("parola kutusuna dokunmaz", () => { box.Clear(); box.UseSystemPasswordChar = true; box.Focus(); return Type("temam "); }, "temam "),
         };

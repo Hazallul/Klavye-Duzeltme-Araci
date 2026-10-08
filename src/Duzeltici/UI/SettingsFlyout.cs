@@ -27,16 +27,16 @@ internal sealed unsafe class SettingsFlyout : Form
     readonly Palette _p;
     readonly Font _titleFont, _bodyFont, _strongFont, _smallFont;
     readonly Label _title, _status, _languageLabel, _languageHint, _strengthLabel, _strengthHint;
-    readonly Label _excludedLabel, _excludedInfo, _last;
+    readonly Label _excludedLabel, _excludedInfo, _learnedLabel, _learnedInfo, _last;
     readonly Switch _master;
     readonly Segmented _language, _strength;
-    readonly SettingRow _turkish, _undo, _enter, _startup;
-    readonly TextButton _addLast, _editExcluded, _quit;
+    readonly SettingRow _turkish, _rules, _undo, _enter, _startup;
+    readonly TextButton _addLast, _editExcluded, _clearLearned, _quit;
     readonly TextBox _excludedBox;
     readonly List<int> _dividers = [];
     bool _wasActive;
     // Form gizliyken alt denetimlerin Visible değeri hep false döner; yerleşim bu alanlara bakar.
-    bool _showAddLast, _editorOpen;
+    bool _showAddLast, _editorOpen, _showClear;
 
     public SettingsFlyout(TrayApp app)
     {
@@ -87,6 +87,8 @@ internal sealed unsafe class SettingsFlyout : Form
 
         _turkish = Row("Türkçe karakterleri tamamla", "calisiyorum → çalışıyorum", s.FixTurkishChars,
             on => s.FixTurkishChars = on);
+        _rules = Row("Yazım kuralları", "herşey → her şey, bunuda → bunu da", s.SpellingRules,
+            on => s.SpellingRules = on);
         _undo = Row("Backspace ile geri al", "Düzeltmeden hemen sonra basınca geri döner", s.UndoWithBackspace,
             on => s.UndoWithBackspace = on);
         _enter = Row("Enter ile de düzelt", "Kapalıyken parola alanlarında daha güvenli", s.CorrectOnEnter,
@@ -111,6 +113,11 @@ internal sealed unsafe class SettingsFlyout : Form
             AccessibleName = "Hariç uygulamalar, her satıra bir exe adı",
         };
 
+        _learnedLabel = MakeLabel("Öğrenilen kelimeler", _strongFont, _p.Text);
+        _learnedInfo = MakeHint();
+        _clearLearned = new TextButton(_p, "Temizle", _smallFont);
+        _clearLearned.Click += (_, _) => _app.ClearLearned();
+
         _last = MakeLabel("", _smallFont, _p.SubText);
         _last.AutoSize = false;
         _quit = new TextButton(_p, "Çıkış", _smallFont);
@@ -118,8 +125,8 @@ internal sealed unsafe class SettingsFlyout : Form
 
         Controls.AddRange([
             _title, _status, _master, _languageLabel, _language, _languageHint, _strengthLabel, _strength,
-            _strengthHint, _turkish, _undo, _enter, _startup, _excludedLabel, _editExcluded, _excludedInfo,
-            _addLast, _excludedBox, _last, _quit,
+            _strengthHint, _turkish, _rules, _undo, _enter, _startup, _excludedLabel, _editExcluded, _excludedInfo,
+            _addLast, _excludedBox, _learnedLabel, _learnedInfo, _clearLearned, _last, _quit,
         ]);
         RefreshState();
     }
@@ -161,6 +168,12 @@ internal sealed unsafe class SettingsFlyout : Form
         _excludedInfo.Text = $"{s.ExcludedApps.Count} uygulamada çalışmaz (terminal, kod editörü, parola yöneticisi…).";
         _last.Text = _app.LastCorrection is { } last ? $"Son: {last}" : "Henüz düzeltme yok";
 
+        var learned = _app.LearnedWords();
+        _learnedInfo.Text = learned.Length == 0
+            ? "Bir düzeltmeyi aynı kelimede iki kez Backspace ile geri alırsan o kelime öğrenilir."
+            : string.Join(", ", learned.Take(12)) + (learned.Length > 12 ? $" ve {learned.Length - 12} kelime daha" : "");
+        _showClear = _clearLearned.Visible = learned.Length > 0;
+
         string? app = ForegroundApp.LastApp;
         bool canAdd = app != null && !s.ExcludedApps.Contains(app, StringComparer.OrdinalIgnoreCase);
         _showAddLast = _addLast.Visible = canAdd;
@@ -185,7 +198,7 @@ internal sealed unsafe class SettingsFlyout : Form
         y = Section(_strengthLabel, _strength, _strengthHint, y);
 
         y = Divider(y - S(4));
-        foreach (var row in new[] { _turkish, _undo, _enter, _startup })
+        foreach (var row in new[] { _turkish, _rules, _undo, _enter, _startup })
         {
             row.SetBounds(rowX, y, rowWidth, row.Height);
             y += row.Height;
@@ -207,6 +220,12 @@ internal sealed unsafe class SettingsFlyout : Form
             _excludedBox.SetBounds(pad, y + S(4), inner, S(110));
             y += S(118);
         }
+
+        y = Divider(y + S(8));
+        _learnedLabel.Location = new Point(pad, y + S(3));
+        _clearLearned.Location = new Point(width - pad - _clearLearned.Width + S(4), y);
+        y += (_showClear ? _clearLearned.Height : _learnedLabel.Height + S(6)) + S(2);
+        y = Hint(_learnedInfo, y, inner);
 
         y = Divider(y + S(8));
         _quit.Location = new Point(width - pad - _quit.Width + S(4), y);

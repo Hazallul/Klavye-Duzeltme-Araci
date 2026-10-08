@@ -10,11 +10,15 @@ temam␣       → tamam␣
 calisiyorum␣ → çalışıyorum␣
 Merhab.      → Merhaba.
 recieve␣     → receive␣
+işlvli␣      → işlevli␣
+düzltmiyo␣   → düzeltmiyo␣     (günlük dil korunur)
+herşey␣      → her şey␣        (TDK yazım kuralları)
+bunuda␣      → bunu da␣
 ```
 
 Simgesi sağ alttaki `^` okunun içindedir. Tıklayınca açılan panelden açıp kapatabilir, dil (Akıllı / Türkçe /
-English), düzeltme gücü (Temkinli / Dengeli / Cesur), Türkçe karakter tamamlama, Backspace ile geri alma,
-Enter'da düzeltme, Windows ile başlatma ve hariç tutulan uygulamaları ayarlayabilirsin.
+English), düzeltme gücü (Temkinli / Dengeli / Cesur), Türkçe karakter tamamlama, yazım kuralları, Backspace ile
+geri alma, Enter'da düzeltme, Windows ile başlatma, hariç tutulan uygulamalar ve öğrenilen kelimeleri ayarlayabilirsin.
 
 ## Kurulum
 
@@ -41,7 +45,7 @@ klavye ─► WH_KEYBOARD_LL kancası (kendi iş parçacığında)
           Corrector.Suggest ── düzeltme yok ──► tuş olduğu gibi geçer
             │ düzeltme var
             ▼
-          ayraç tuşu yutulur ─► odaktaki alan parola mı? (ayrı iş parçacığında, en çok 150 ms)
+          ayraç tuşu yutulur ─► odaktaki alan parola mı? (kelimenin ilk harfinde sorulmuştu)
             │ değil                                 │ parola / cevap gelmedi
             ▼                                       ▼
           SendInput: ⌫ × fark + doğru harfler + ayraç     yalnızca ayraç geri verilir
@@ -54,15 +58,27 @@ klavye ─► WH_KEYBOARD_LL kancası (kendi iş parçacığında)
 - **Puanlama:** aday = ln(sıklık) − hata maliyeti; yazılan = ln(sıklık) + önyargı. Komşu tuş, yer
   değiştirme ve çift harf gibi olası hatalar ucuz, ş → s gibi bilerek basılmış Türkçe harfi bozmak pahalı.
   Altyazı listesinde hatalı biçimler de bulunduğu için ("temam" 16 kez geçiyor) sadece "sözlükte var mı?"
-  diye bakılmıyor; çok daha sık geçen bir komşusu varsa düzeltiliyor.
+  diye bakılmıyor; çok daha sık geçen bir komşusu varsa düzeltiliyor. Sözlükte hiç olmayan kelimeler için
+  eşik daha düşük ve iki hatalık arama da yapılıyor (süre sınırlı: Dengeli'de en çok 1 ms).
+- **Günlük dil:** `geliyo`, `yapıyom` gibi biçimler sözlükte yok ama `geliyor`, `yapıyorum` var; sıklıkları
+  oradan alınır ve üslup korunur (`düzltmiyo` → `düzeltmiyo`).
+- **Yazım kuralları:** sıklıkla bulunamayan TDK yanlışları. Altyazılarda `herşey` 25 bin kez geçtiği için
+  sözlükte doğru görünür; kural listesi düzeltir (`herşey` → `her şey`, `diyip` → `deyip`, `yanlız` → `yalnız`).
+  Bağlaç `de/da` ve `ki` ayrı yazılır (`bunuda` → `bunu da`) ama `evde`, `belki` gibi bitişik olanlara dokunulmaz:
+  kök bitişik halinden en az 150 kat sık değilse ayrılmaz.
 - **Akıllı dil:** "olduğu gibi bırak" ve "her dildeki en iyi düzeltme" seçenekleri dil boyutuna göre
   normalleştirilip son kelimelerin diline yakınlık eklenerek yarışır.
 - **Dokunulmayanlar:** KISALTMA, camelCase, rakamlı kelimeler, adres ve e-postalar (`site.com`, `ad@posta`),
   parola alanları, yönetici olarak çalışan uygulamalar, hariç listesindeki uygulamalar (terminal, kod
   editörü, parola yöneticisi, uzak masaüstü).
 - **Parola alanları:** düzeltme gönderilmeden hemen önce sorulur. Klasik Windows kutuları için `ES_PASSWORD`,
-  tarayıcı, Electron ve XAML uygulamaları için UI Automation (`IsPassword`). Soru yalnızca bir düzeltme
-  yapılacakken sorulur; cevap 150 ms içinde gelmezse güvenli tarafta kalınır ve düzeltme yapılmaz.
+  tarayıcı, Electron ve XAML uygulamaları için UI Automation (`IsPassword`). Soru kelimenin ilk harfinde, ayrı
+  bir iş parçacığında sorulur; kelime bitince cevap çoğu zaman hazırdır (Chromium bir süre sorgu gelmezse
+  erişilebilirliği kapatır, ilk sorgu 200 ms'yi bulabilir). Kelime bittiğinde cevap hâlâ yoksa en çok 200 ms
+  beklenir, gelmezse güvenli tarafta kalınır ve düzeltme yapılmaz.
+- **Geri alma ve öğrenme:** düzeltmeden hemen sonra Backspace eski hali geri getirir; kelime o oturum boyunca
+  rahat bırakılır. Aynı kelime ikinci kez geri alınırsa kalıcı öğrenilir. Öğrenilenler panelde görünür ve
+  tek tıkla temizlenir.
 - **Tuş sırası:** `SendInput` tuşları giriş kuyruğunun sonuna ekler. Bu yüzden düzeltme paketi uygulamaya
   ulaşana kadar (paketin son tuşu kancadan geçene kadar) kullanıcının bastığı tuşlar yutulur ve arkasından
   gönderilir. Hızlı yazımda harf kaybolmaz; 500 ms güvenlik süresi klavyenin asla kilitli kalmamasını sağlar.
@@ -73,10 +89,10 @@ klavye ─► WH_KEYBOARD_LL kancası (kendi iş parçacığında)
 
 | | |
 |---|---|
-| Kelime başına süre (Dengeli) | ~40 µs |
-| Kelime başına süre (Cesur, iki hatalık arama) | ~1–2 ms |
+| Kelime başına süre (Dengeli, sözlüğe yakın kelime) | ~40 µs |
+| Kelime başına süre (iki hatalık arama gerekince) | en çok ~1 ms (Dengeli), ~4 ms (Cesur) |
 | Boştayken işlemci | 0 (fare kancası yalnızca yarım kelime varken takılır) |
-| Bellek | ~24 MB özel |
+| Bellek | ~25 MB özel (sözlükler 13 MB, 1 MB'lık hızlı ret süzgeçleri dahil) |
 | Sözlük yükleme | ~220 ms, arka planda |
 
 ## Geliştirme
@@ -90,8 +106,8 @@ dotnet tests\Duzeltici.Tests\bin\Release\net10.0-windows\Duzeltici.Tests.dll --e
 
 Uçtan uca test bir pencere açıp içine tuş gönderir. Tuşlar başka bir yere gitmesin diye her tuştan önce
 kendi penceresinin önde olduğunu kontrol eder. Çalışırken klavyeye dokunma: pencere öne geçtiği için
-bastığın tuşlar test kutusuna düşer. Test, geri alma adımında `okuldaa` kelimesini öğretir;
-`%APPDATA%\Duzeltici\ogrenilen.txt` dosyasından silebilirsin.
+bastığın tuşlar test kutusuna düşer. Geri alma adımındaki `okuldaa` yalnızca o oturumda rahat bırakılır,
+kalıcı öğrenilmez.
 
 Simgeyi yeniden üretmek için `tools\make-icon.ps1`. Sözlükleri yeniden üretmek için ham listeleri indirip şunu çalıştır:
 
@@ -101,6 +117,9 @@ node tools/build-dict.mjs tr_full.txt en_50k.txt
 
 Ayarlar `%APPDATA%\Duzeltici\ayarlar.json`, öğrenilen kelimeler `ogrenilen.txt`, hatalar `hata.log`
 dosyasında. Yazılan metin hiçbir yere kaydedilmez.
+
+`DUZELTICI_TANI=1` ortam değişkeniyle başlatılırsa parola sorgularının süreleri ve düzeltme kararları
+`tani.log`'a yazılır (yazılan kelimeler yazılmaz). Bir kelime beklendiği halde düzeltilmiyorsa ilk bakılacak yer.
 
 ## Bilinen sınırlar
 

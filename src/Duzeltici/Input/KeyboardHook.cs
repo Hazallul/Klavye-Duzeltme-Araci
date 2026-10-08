@@ -17,7 +17,7 @@ internal static unsafe class KeyboardHook
     const nuint Marker = 0x445A4C54;    // "DZLT": kendi gönderdiğimiz tuşları tanımak için
     const nuint EndMarker = 0x44450000; // gönderdiğimiz paketin son tuşu; alt 16 bit paket numarası
     const uint FlushTimeoutMs = 500;
-    const uint VerdictTimeoutMs = 150; // parola denetimi bundan uzun sürerse düzeltme yapılmaz
+    const uint VerdictTimeoutMs = 200; // kelime bitince cevap hâlâ yoksa en çok bu kadar beklenir
     const uint WatchdogMs = 30_000;
     const int MaxWord = 40;
     const uint MsgStart = WM_APP + 1, MsgStop = WM_APP + 2, MsgFlush = WM_APP + 3, MsgMouse = WM_APP + 4, MsgVerdict = WM_APP + 5;
@@ -31,8 +31,8 @@ internal static unsafe class KeyboardHook
 
     /// <summary>(yazılan, düzeltilen) — arayüz iş parçacığında çağrılır.</summary>
     public static event Action<string, string>? Corrected;
-    /// <summary>Geri alınan (öğrenilen) kelime — arayüz iş parçacığında çağrılır.</summary>
-    public static event Action<string>? Undone;
+    /// <summary>(geri alınan kelime, kalıcı öğrenildi mi) — arayüz iş parçacığında çağrılır.</summary>
+    public static event Action<string, bool>? Undone;
 
     static SynchronizationContext s_ui = null!;
     static uint s_threadId;
@@ -66,6 +66,10 @@ internal static unsafe class KeyboardHook
     // başına eklenir, gelmezse atılır ve yalnızca yutulan ayraç tuşu geri verilir.
     static readonly List<INPUT> s_fix = new(32);
     static int s_check, s_verdictFor;
+    // Parola sorusu kelimenin ilk harfinde sorulur; kelime bitene kadar cevap çoğu zaman hazırdır.
+    // (Chromium bir süre sorgu gelmezse erişilebilirliği kapatır; ilk sorgu 200 ms'yi bulabilir.)
+    static int s_wordProbe, s_probeAnswered;
+    static bool s_probeSafe;
     static int s_deferredDowns;
     static string? s_fixTyped, s_fixWord;
     static bool s_fixCanUndo;
@@ -101,7 +105,7 @@ internal static unsafe class KeyboardHook
                     case MsgStop: Uninstall(); break;
                     case MsgFlush: Flush(); break;
                     case MsgMouse: UpdateMouseHook(); break;
-                    case MsgVerdict: OnVerdict((int)msg.wParam, msg.lParam != 0); break;
+                    case MsgVerdict: ProbeAnswered((int)msg.wParam, msg.lParam != 0); break;
                     case WM_TIMER when msg.wParam == (nint)s_watchdog: Watchdog(); break;
                     case WM_TIMER when s_verdictFor != 0: OnVerdict(s_verdictFor, safe: false); break;
                     case WM_TIMER: FlushTimedOut(); break;
@@ -257,6 +261,7 @@ internal static unsafe class KeyboardHook
         if (char.IsLetter(ch))
         {
             s_undoTyped = null;
+            if (s_len == 0) StartProbe();
             if (s_len < MaxWord) s_word[s_len++] = ch;
             else s_dirty = true;
             UpdateMouseHook();
@@ -286,6 +291,7 @@ internal static unsafe class KeyboardHook
         }
 
         s_len = 0;
+        s_wordProbe = 0;
         s_dirty = false;
         s_joined = ch is not (' ' or '\n' or '(' or '"');
         UpdateMouseHook();
@@ -324,15 +330,37 @@ internal static unsafe class KeyboardHook
         (s_fixTyped, s_fixWord, s_fixCanUndo) = (typed, fix, canUndo);
         s_deferredDowns = 0;
         s_pending = true;
-        s_verdictFor = ++s_check;
+        if (s_wordProbe != 0 && s_probeAnswered == s_wordProbe)
+        {
+            // Cevap hazır; yine de kancanın içinde göndermemek için kendimize ileti olarak yolla.
+            s_verdictFor = s_wordProbe;
+            PostThreadMessageW(s_threadId, MsgVerdict, s_wordProbe, s_probeSafe ? 1 : 0);
+            return;
+        }
+        if (s_wordProbe == 0) PasswordProbe.Ask(s_wordProbe = ++s_check);
+        s_verdictFor = s_wordProbe;
         s_timer = SetTimer(0, s_timer, VerdictTimeoutMs, 0);
-        PasswordProbe.Ask(s_verdictFor);
     }
+
+    static void StartProbe()
+    {
+        if (s_verdictFor != 0) return; // önceki düzeltmenin cevabı bekleniyor; onu ezmeyelim
+        PasswordProbe.Ask(s_wordProbe = ++s_check);
+    }
+
+    static void ProbeAnswered(int request, bool safe)
+    {
+        (s_probeAnswered, s_probeSafe) = (request, safe);
+        if (request == s_verdictFor) OnVerdict(request, safe);
+    }
+
+    static readonly bool s_trace = Environment.GetEnvironmentVariable("DUZELTICI_TANI") == "1";
 
     static void OnVerdict(int request, bool safe)
     {
         if (request != s_verdictFor) return; // süresi geçmiş eski cevap
         s_verdictFor = 0;
+        if (s_trace) Log.Trace($"karar #{request}: {(safe ? "düzeltildi" : "atlandı (parola ya da zaman aşımı)")}");
         if (safe)
         {
             s_queue.InsertRange(0, s_fix);
@@ -347,7 +375,8 @@ internal static unsafe class KeyboardHook
         Flush();
     }
 
-    /// <summary>Düzeltmeden hemen sonra Backspace: "tamam␣" → "temam" ve kelimeyi öğren.</summary>
+    /// <summary>Düzeltmeden hemen sonra Backspace: "tamam␣" → "temam". Aynı kelime ikinci kez geri
+    /// alınırsa kalıcı öğrenilir (bkz. Corrector.Reject).</summary>
     static void QueueUndo()
     {
         string typed = s_undoTyped!, fix = s_undoFixed!;
@@ -358,11 +387,11 @@ internal static unsafe class KeyboardHook
         for (int i = same; i < fix.Length; i++) AddBackspace(s_queue);
         for (int i = same; i < typed.Length; i++) AddChar(s_queue, typed[i]);
 
-        Corrector?.Learn(typed);
+        bool learned = Corrector?.Reject(typed) ?? false;
         typed.AsSpan().CopyTo(s_word);
         s_len = typed.Length;
         s_dirty = true; // kullanıcı bu kelimeyi böyle istiyor; devam ederse de dokunma
-        Schedule(() => Undone?.Invoke(typed));
+        Schedule(() => Undone?.Invoke(typed, learned));
     }
 
     static void Schedule(Action notify)
@@ -470,6 +499,7 @@ internal static unsafe class KeyboardHook
     static void Reset(bool updateMouseHook = true)
     {
         s_len = 0;
+        s_wordProbe = 0; // odak değişmiş olabilir; cevap artık geçersiz
         s_dirty = s_joined = false;
         s_undoTyped = s_undoFixed = null;
         if (updateMouseHook) UpdateMouseHook();

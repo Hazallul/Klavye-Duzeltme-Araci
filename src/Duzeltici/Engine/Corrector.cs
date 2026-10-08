@@ -24,10 +24,24 @@ public sealed class Corrector
     const float DeleteCost = 3.5f;
     const float DoubledInsertCost = 1.0f; // "helo" → "hello", "teşekürler" → "teşekkürler"
     const float InsertCost = 3.0f;
+    const float VowelInsertCost = 2.5f;   // hızlı yazarken en çok ünlüler atlanır: "düzltmiyo"
     const int MaxTurkishSpots = 10;       // en çok 2^10 Türkçe karakter birleşimi
 
+    /// <summary>Günlük dil: "geliyo, yapıyom" sözlükte yok ama "geliyor, yapıyorum" var. Sıklıkları
+    /// standart biçimden alınır; kullanıcının üslubu bozulmaz ("düzltmiyo" → "düzeltmiyo").</summary>
+    static readonly (byte[] Colloquial, byte[] Standard)[] s_colloquial =
+        new[] { ("yonuz", "yorsunuz"), ("yolar", "yorlar"), ("yom", "yorum"), ("yon", "yorsun"), ("yoz", "yoruz"), ("yo", "yor") }
+            .Select(p => (Alphabet.Encode(p.Item1), Alphabet.Encode(p.Item2))).ToArray();
+
+    // İki hatalık arama için süre sınırı; anlamsız uzun dizgilerde bile yazma gecikmesin.
+    long _deadline;
+    bool _outOfTime;
+
     readonly WordTable?[] _tables = new WordTable?[2];
-    readonly HashSet<string> _learned = new(StringComparer.Ordinal);
+    // Öğrenilenler klavye iş parçacığında eklenir, arayüzden temizlenebilir; kilit bu ikisi için.
+    readonly Lock _gate = new();
+    readonly HashSet<string> _learned = new(StringComparer.Ordinal);  // kalıcı (ogrenilen.txt)
+    readonly HashSet<string> _rejected = new(StringComparer.Ordinal); // bu oturumda bir kez geri alındı
     readonly Lang[] _recent = new Lang[8];
     int _recentCount, _recentNext;
 
@@ -43,15 +57,53 @@ public sealed class Corrector
     public LanguageMode Mode { get; set; } = LanguageMode.Smart;
     public Sensitivity Sensitivity { get; set; } = Sensitivity.Balanced;
     public bool FixTurkishChars { get; set; } = true;
+    /// <summary>TDK yazım kuralları: "herşey" → "her şey", "bunuda" → "bunu da", "diyip" → "deyip".</summary>
+    public bool SpellingRules { get; set; } = true;
 
     public void SetTable(Lang lang, WordTable table) => _tables[(int)lang] = table;
     public bool HasTable(Lang lang) => _tables[(int)lang] != null;
 
-    /// <summary>Kullanıcının geri aldığı kelimeyi bir daha düzeltmemek için öğrenir.</summary>
-    public bool Learn(string word)
+    /// <summary>Kelimeyi kalıcı olarak öğrenir (ogrenilen.txt'den yüklerken).</summary>
+    public void Learn(string word)
     {
-        bool added = _learned.Add(Lower(word, Lang.Tr));
-        return _learned.Add(Lower(word, Lang.En)) | added;
+        lock (_gate)
+        {
+            _learned.Add(Lower(word, Lang.Tr));
+            _learned.Add(Lower(word, Lang.En));
+        }
+    }
+
+    /// <summary>
+    /// Kullanıcı düzeltmeyi Backspace ile geri aldı. İlk seferde kelime yalnızca bu oturumda rahat
+    /// bırakılır: Backspace'e çoğu zaman sadece boşluğu silmek için de basılır. Aynı kelime ikinci kez
+    /// geri alınırsa gerçekten böyle yazılmak isteniyordur; kalıcı öğrenilir.
+    /// </summary>
+    /// <returns>true: kalıcı olarak öğrenildi (dosyaya yazılmalı).</returns>
+    public bool Reject(string word)
+    {
+        string key = Lower(word, Lang.Tr);
+        lock (_gate)
+        {
+            if (_rejected.Add(key)) return false;
+            _learned.Add(key);
+            _learned.Add(Lower(word, Lang.En));
+            return true;
+        }
+    }
+
+    /// <summary>Kalıcı öğrenilen kelimeler (Türkçe küçük harfle, sıralı).</summary>
+    public string[] LearnedWords(IEnumerable<string> saved)
+    {
+        lock (_gate) return saved.Select(w => Lower(w, Lang.Tr)).Where(_learned.Contains).Distinct().Order(StringComparer.Ordinal).ToArray();
+    }
+
+    public void ClearLearned()
+    {
+        lock (_gate)
+        {
+            _learned.Clear();
+            _rejected.Clear();
+        }
     }
 
     /// <summary>Düzeltilmiş kelimeyi (yazılanın büyük/küçük harf biçimiyle) ya da null döner.</summary>
@@ -63,27 +115,51 @@ public sealed class Corrector
             if (!char.IsLower(typed[i])) return null; // KISALTMA, camelCase vb. dokunma
         if (!title && !char.IsLower(typed[0])) return null;
 
-        if (_learned.Count > 0 && (_learned.Contains(Lower(typed, Lang.Tr)) || _learned.Contains(Lower(typed, Lang.En))))
-            return null;
-
-        var (bias, protect, margin, maxDistance) = Sensitivity switch
+        lock (_gate)
         {
-            Sensitivity.Careful => (5.0f, MathF.Log(300), 1.0f, 1),
-            Sensitivity.Bold => (1.5f, MathF.Log(10_000), 0.2f, 2),
-            _ => (3.0f, MathF.Log(2_000), 0.5f, 1),
+            if (_learned.Count + _rejected.Count > 0)
+            {
+                string tr = Lower(typed, Lang.Tr);
+                if (_rejected.Contains(tr) || _learned.Contains(tr) || _learned.Contains(Lower(typed, Lang.En))) return null;
+            }
+        }
+
+        if (SpellingRules && Mode != LanguageMode.English && _tables[(int)Lang.Tr] is { } turkish)
+        {
+            string? rule = TurkishRules.Apply(Lower(typed, Lang.Tr), w => Frequency(turkish, w));
+            if (rule != null)
+            {
+                Remember(Lang.Tr);
+                return title ? Alphabet.ToUpper(rule[0], Lang.Tr) + rule[1..] : rule;
+            }
+        }
+
+        // bias: sözlükteki bir kelimeyi kullanıcının bilerek yazdığına dair önyargı.
+        // unknownBias: sözlükte hiç olmayan kelime için aynısı; çok daha düşük, çünkü büyük ihtimalle
+        // bir yazım hatası (ama nadir bir çekimli biçim de olabilir, sıfır değil).
+        var (bias, unknownBias, protect, margin, maxDistance) = Sensitivity switch
+        {
+            Sensitivity.Careful => (5.0f, 3.0f, MathF.Log(300), 1.0f, 1),
+            Sensitivity.Bold => (1.5f, 0.0f, MathF.Log(10_000), 0.2f, 2),
+            _ => (3.0f, 1.0f, MathF.Log(2_000), 0.5f, 2),
         };
 
         // Her dil için iki seçenek olabilir: kelimeyi olduğu gibi bırakmak (o dilde varsa) ya da
         // o dildeki en iyi düzeltme. Puanlar dilin toplam sıklığına göre normalleştirilip son
         // kelimelerin diline biraz yakınlık eklenince hepsi aynı ölçekte yarışır. Böylece altyazı
         // listesinde 129 kez geçen "helo" Türkçe sayılıp "hello" düzeltmesini engellemez.
+        // İki hatalık arama, kelimenin tüm dilleri için toplam bu süreyi aşamaz.
+        _deadline = System.Diagnostics.Stopwatch.GetTimestamp()
+            + System.Diagnostics.Stopwatch.Frequency * (Sensitivity == Sensitivity.Bold ? 4 : 1) / 1000;
+        _outOfTime = false;
+
         float keepScore = float.NegativeInfinity, fixScore = float.NegativeInfinity;
         Lang keepLang = default, fixLang = default;
         string? fix = null;
         foreach (var lang in (ReadOnlySpan<Lang>)[Lang.Tr, Lang.En])
         {
             if (Mode == (lang == Lang.Tr ? LanguageMode.English : LanguageMode.Turkish)) continue;
-            var o = Evaluate(typed, lang, bias, protect, margin, maxDistance);
+            var o = Evaluate(typed, lang, bias, unknownBias, protect, margin, maxDistance);
             if (!o.Applicable) continue;
             if (o.Protected) return Keep(lang); // çok yaygın bir kelime: asla dokunma
 
@@ -110,7 +186,7 @@ public sealed class Corrector
     /// <param name="Word">Yazılanı açık farkla geçen aday; yoksa null.</param>
     readonly record struct Outcome(bool Applicable, bool Known, bool Protected, float Own, float Best, string? Word);
 
-    Outcome Evaluate(ReadOnlySpan<char> typed, Lang lang, float bias, float protect, float margin, int maxDistance)
+    Outcome Evaluate(ReadOnlySpan<char> typed, Lang lang, float bias, float unknownBias, float protect, float margin, int maxDistance)
     {
         var table = _tables[(int)lang];
         if (table == null || !Alphabet.TryEncode(typed, lang, _typed)) return default;
@@ -120,9 +196,9 @@ public sealed class Corrector
         _typedLen = typed.Length;
         var t = _typed.AsSpan(0, _typedLen);
 
-        int q = table.Find(t);
+        int q = Lookup(t);
         bool known = q >= 0;
-        float own = (known ? q / 16f : 0f) + bias;
+        float own = known ? q / 16f + bias : unknownBias;
         if (known && q / 16f >= protect) return new Outcome(true, true, true, own, 0, null);
 
         _bestScore = _secondScore = float.NegativeInfinity;
@@ -140,7 +216,9 @@ public sealed class Corrector
             }
         }
         if (float.IsNegativeInfinity(_bestScore) && maxDistance >= 2 && !known && t.Length is >= 5 and <= 12)
+        {
             Edits(t, 2, 0f, cheapOnly: false);
+        }
 
         bool wins = _bestScore > own && _bestScore - _secondScore >= margin;
         if (!wins) return new Outcome(true, known, false, own, _bestScore, null);
@@ -195,7 +273,8 @@ public sealed class Corrector
                     : y == Alphabet.AsciiTwin(x) ? DeturkishCost
                     : Alphabet.Adjacent(x, y) ? AdjacentCost
                     : ReplaceCost;
-                if (cheapOnly && cost > AdjacentCost) continue;
+                // İki hatalık aramada rastgele harf değişimi atlanır (işin yarısı, isabeti düşük).
+                if ((cheapOnly || depth > 1) && cost > AdjacentCost) continue;
                 c[i] = y;
                 Emit(c[..n], depth, baseCost + cost);
             }
@@ -211,15 +290,22 @@ public sealed class Corrector
                 t[i..].CopyTo(c[(i + 1)..]);
                 if (cheapOnly)
                 {
-                    // yalnızca çift harf: "helo" → "hello"
+                    // çift harf ("helo" → "hello") ya da en sık atlanan harfler (ünlüler, r, n, l...):
+                    // "düzltmiyo" → "düzeltmiyor"
                     if (i > 0) { c[i] = t[i - 1]; Emit(c[..(n + 1)], depth, baseCost + DoubledInsertCost); }
+                    foreach (byte y in _lang == Lang.Tr ? Alphabet.TrCommonInserts : Alphabet.EnCommonInserts)
+                    {
+                        if (i > 0 && y == t[i - 1]) continue;
+                        c[i] = y;
+                        Emit(c[..(n + 1)], depth, baseCost + (Alphabet.IsVowel(y) ? VowelInsertCost : InsertCost));
+                    }
                     continue;
                 }
                 foreach (byte y in letters)
                 {
                     c[i] = y;
                     bool doubled = (i > 0 && t[i - 1] == y) || (i < n && t[i] == y);
-                    Emit(c[..(n + 1)], depth, baseCost + (doubled ? DoubledInsertCost : InsertCost));
+                    Emit(c[..(n + 1)], depth, baseCost + (doubled ? DoubledInsertCost : Alphabet.IsVowel(y) ? VowelInsertCost : InsertCost));
                 }
             }
         }
@@ -227,8 +313,35 @@ public sealed class Corrector
 
     void Emit(ReadOnlySpan<byte> candidate, int depth, float cost)
     {
-        if (depth > 1) Edits(candidate, depth - 1, cost, cheapOnly: true);
-        else Consider(candidate, cost);
+        if (depth == 1)
+        {
+            Consider(candidate, cost);
+            return;
+        }
+        if (_outOfTime || System.Diagnostics.Stopwatch.GetTimestamp() > _deadline)
+        {
+            _outOfTime = true;
+            return;
+        }
+        Edits(candidate, depth - 1, cost, cheapOnly: true);
+    }
+
+    /// <summary>Sözlükte arar; Türkçede bulunamazsa günlük dil biçimini ("-yo") de dener.</summary>
+    int Lookup(ReadOnlySpan<byte> word)
+    {
+        int q = _table.Find(word);
+        if (q >= 0 || _lang != Lang.Tr) return q;
+        foreach (var (colloquial, standard) in s_colloquial)
+        {
+            if (word.Length < colloquial.Length + 3 || !word.EndsWith(colloquial)) continue;
+            int stem = word.Length - colloquial.Length;
+            if (stem + standard.Length > Alphabet.MaxWord) return -1;
+            Span<byte> full = stackalloc byte[Alphabet.MaxWord];
+            word[..stem].CopyTo(full);
+            standard.CopyTo(full[stem..]);
+            return _table.Find(full[..(stem + standard.Length)]);
+        }
+        return -1;
     }
 
     /// <summary>"calisiyorum" → "çalışıyorum": c/g/i/o/s/u harflerinin Türkçe karşılıklarının
@@ -257,7 +370,7 @@ public sealed class Corrector
 
     void Consider(ReadOnlySpan<byte> candidate, float cost)
     {
-        int q = _table.Find(candidate);
+        int q = Lookup(candidate);
         if (q < 0) return;
         if (candidate.SequenceEqual(_typed.AsSpan(0, _typedLen))) return;
 
@@ -292,6 +405,14 @@ public sealed class Corrector
         _recent[_recentNext] = lang;
         _recentNext = (_recentNext + 1) % _recent.Length;
         if (_recentCount < _recent.Length) _recentCount++;
+    }
+
+    static float? Frequency(WordTable table, string word)
+    {
+        Span<byte> codes = stackalloc byte[Alphabet.MaxWord];
+        if (word.Length > Alphabet.MaxWord || !Alphabet.TryEncode(word, Lang.Tr, codes)) return null;
+        int q = table.Find(codes[..word.Length]);
+        return q < 0 ? null : q / 16f;
     }
 
     static string Lower(ReadOnlySpan<char> s, Lang lang)

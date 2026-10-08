@@ -14,14 +14,19 @@ public sealed class WordTable
     readonly byte[] _blob;
     readonly int[] _slots; // konum + 1, 0 = boş
     readonly int _mask;
+    // Hızlı ret süzgeci (1 MB): adayların çoğu sözlükte olmayan dizgiler. Hash tablosuna gidip
+    // önbellek ıskası yaşamadan önce bu küçük bit dizisine bakılır; ~%93'ü burada elenir.
+    readonly ulong[] _filter;
+    const int FilterBits = 1 << 23;
 
     public int Count { get; }
     /// <summary>ln(toplam sıklık); diller arası karşılaştırmada sıklıkları normalleştirir.</summary>
     public float LogTotal { get; }
 
-    WordTable(byte[] blob, int[] slots, int count, float logTotal)
+    WordTable(byte[] blob, int[] slots, ulong[] filter, int count, float logTotal)
     {
         _blob = blob;
+        _filter = filter;
         _slots = slots;
         _mask = slots.Length - 1;
         Count = count;
@@ -31,7 +36,10 @@ public sealed class WordTable
     /// <summary>Sıklığın doğal logaritması ×16 olarak (0..255), kelime yoksa -1.</summary>
     public int Find(ReadOnlySpan<byte> word)
     {
-        int i = (int)Hash(word) & _mask;
+        uint h = Hash(word);
+        uint bit = FilterBit(h);
+        if ((_filter[bit >> 6] & (1UL << (int)bit)) == 0) return -1;
+        int i = (int)h & _mask;
         while (true)
         {
             int slot = _slots[i];
@@ -49,6 +57,7 @@ public sealed class WordTable
         int lines = text.AsSpan().Count((byte)'\n') + 1;
         int capacity = (int)BitOperations.RoundUpToPowerOf2((uint)(lines * 5 / 3));
         var slots = new int[capacity];
+        var filter = new ulong[FilterBits / 64];
         var blob = new byte[text.Length + 2 * lines];
         int blobLen = 0, count = 0, mask = capacity - 1;
         double total = 0;
@@ -82,6 +91,8 @@ public sealed class WordTable
                 existing = Math.Max(existing, q);
                 continue;
             }
+            uint bit = FilterBit(Hash(word));
+            filter[bit >> 6] |= 1UL << (int)bit;
             slots[i] = blobLen + 1;
             blob[blobLen] = (byte)n;
             blob[blobLen + 1] = q;
@@ -91,8 +102,10 @@ public sealed class WordTable
         }
 
         Array.Resize(ref blob, blobLen);
-        return new WordTable(blob, slots, count, (float)Math.Log(Math.Max(total, 1)));
+        return new WordTable(blob, slots, filter, count, (float)Math.Log(Math.Max(total, 1)));
     }
+
+    static uint FilterBit(uint hash) => (hash * 0x9E3779B1u) >> 9; // tablo indeksinden bağımsız bitler
 
     static uint Hash(ReadOnlySpan<byte> s)
     {

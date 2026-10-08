@@ -21,6 +21,8 @@ public static class Alphabet
     /// <summary>Ekleme/değiştirme denemelerinde kullanılan harfler.</summary>
     public static readonly byte[] TrEdits;
     public static readonly byte[] EnEdits;
+    /// <summary>İki hatalık aramada ikinci hata olarak denenen, en sık atlanan harfler.</summary>
+    public static readonly byte[] TrCommonInserts, EnCommonInserts;
 
     static Alphabet()
     {
@@ -34,6 +36,8 @@ public static class Alphabet
 
         TrEdits = Encode("abcçdefgğhıijklmnoöprsştuüvyzqwx");
         EnEdits = Encode("abcdefghijklmnopqrstuvwxyz");
+        TrCommonInserts = Encode("aeıioöuürnlkmyd");
+        EnCommonInserts = Encode("aeioulnrst");
 
         // Türkçe Q klavye. Satırlar yarım tuş kaydırılmış; yan yana ya da çapraz komşu
         // tuşlar "yakın" sayılır (parmak kayması hatası).
@@ -50,11 +54,12 @@ public static class Alphabet
         }
     }
 
-    static byte[] Encode(string s) => s.Select(c => s_code[c]).ToArray();
+    public static byte[] Encode(string s) => s.Select(c => s_code[c]).ToArray();
 
     public static char Char(byte code) => Letters[code];
 
     public static bool Adjacent(byte a, byte b) => s_adjacent[a * Size + b];
+    public static bool IsVowel(byte code) => Letters[code] is 'a' or 'e' or 'ı' or 'i' or 'o' or 'ö' or 'u' or 'ü' or 'â' or 'î' or 'û';
     public static byte TurkishTwin(byte code) => s_turkishTwin[code];
     public static byte AsciiTwin(byte code) => s_asciiTwin[code];
 

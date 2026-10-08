@@ -18,6 +18,9 @@ internal static class PasswordProbe
     static volatile int s_request;
     static uint s_replyThread, s_replyMessage;
 
+    /// <summary>DUZELTICI_TANI=1 ise her sorgunun süresi %APPDATA%\Duzeltici\tani.log'a yazılır.</summary>
+    static readonly bool s_trace = Environment.GetEnvironmentVariable("DUZELTICI_TANI") == "1";
+
     public static void Start(uint replyThread, uint replyMessage)
     {
         (s_replyThread, s_replyMessage) = (replyThread, replyMessage);
@@ -49,7 +52,9 @@ internal static class PasswordProbe
         {
             s_signal.WaitOne();
             int request = s_request;
+            long started = System.Diagnostics.Stopwatch.GetTimestamp();
             bool safe = uia == null || !IsPassword(uia);
+            if (s_trace) Log.Trace($"parola sorgusu #{request}: {System.Diagnostics.Stopwatch.GetElapsedTime(started).TotalMilliseconds:F1} ms, güvenli={safe}");
             Native.PostThreadMessageW(s_replyThread, s_replyMessage, request, safe ? 1 : 0);
         }
     }

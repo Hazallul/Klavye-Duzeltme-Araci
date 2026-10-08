@@ -60,6 +60,7 @@ internal sealed class TrayApp : ApplicationContext
         _corrector.Mode = s.Language;
         _corrector.Sensitivity = s.Sensitivity;
         _corrector.FixTurkishChars = s.FixTurkishChars;
+        _corrector.SpellingRules = s.SpellingRules;
         KeyboardHook.UndoWithBackspace = s.UndoWithBackspace;
         KeyboardHook.CorrectOnEnter = s.CorrectOnEnter;
         KeyboardHook.MinWordLength = Math.Clamp(s.MinWordLength, 2, 10);
@@ -127,11 +128,20 @@ internal sealed class TrayApp : ApplicationContext
         _flyout?.RefreshState();
     }
 
-    void OnUndone(string word)
+    void OnUndone(string word, bool learned)
     {
         CorrectionCount = Math.Max(0, CorrectionCount - 1);
-        LastCorrection = $"“{word}” öğrenildi";
-        AppSettings.AppendLearned(word);
+        LastCorrection = learned ? $"“{word}” öğrenildi" : $"“{word}” geri alındı";
+        if (learned) AppSettings.AppendLearned(word);
+        _flyout?.RefreshState();
+    }
+
+    public string[] LearnedWords() => _corrector.LearnedWords(AppSettings.LoadLearned());
+
+    public void ClearLearned()
+    {
+        _corrector.ClearLearned();
+        AppSettings.ClearLearned();
         _flyout?.RefreshState();
     }
 

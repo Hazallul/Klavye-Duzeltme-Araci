@@ -10,6 +10,7 @@ public sealed class AppSettings
     public LanguageMode Language { get; set; } = LanguageMode.Smart;
     public Sensitivity Sensitivity { get; set; } = Sensitivity.Balanced;
     public bool FixTurkishChars { get; set; } = true;
+    public bool SpellingRules { get; set; } = true;
     public bool UndoWithBackspace { get; set; } = true;
     public bool CorrectOnEnter { get; set; }
     public int MinWordLength { get; set; } = 3;
@@ -29,6 +30,7 @@ public sealed class AppSettings
     static string SettingsPath => Path.Combine(Folder, "ayarlar.json");
     public static string LearnedPath => Path.Combine(Folder, "ogrenilen.txt");
     public static string LogPath => Path.Combine(Folder, "hata.log");
+    public static string TracePath => Path.Combine(Folder, "tani.log");
 
     public static AppSettings Load()
     {
@@ -70,6 +72,18 @@ public sealed class AppSettings
         }
     }
 
+    public static void ClearLearned()
+    {
+        try
+        {
+            File.Delete(LearnedPath);
+        }
+        catch (Exception ex)
+        {
+            Log.Error(ex);
+        }
+    }
+
     public static void AppendLearned(string word)
     {
         try
@@ -91,6 +105,19 @@ internal partial class SettingsJson : JsonSerializerContext;
 internal static class Log
 {
     static readonly Lock s_lock = new();
+
+    /// <summary>Tanılama satırı (yalnızca DUZELTICI_TANI=1 iken çağrılır). Yazılan metni asla içermez.</summary>
+    public static void Trace(string line)
+    {
+        try
+        {
+            lock (s_lock) File.AppendAllText(AppSettings.TracePath, $"{DateTime.Now:HH:mm:ss.fff} {line}\n");
+        }
+        catch
+        {
+            // tanılama yazılamazsa önemli değil
+        }
+    }
 
     public static void Error(Exception ex)
     {

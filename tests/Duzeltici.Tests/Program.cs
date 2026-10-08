@@ -47,6 +47,28 @@ Expect("yapıyosun", "yapıyorsun");
 Expect("bilmiyorm", "bilmiyorum");
 Expect("teşekürler", "teşekkürler");
 
+Console.WriteLine("\nKullanıcının bildirdikleri");
+Expect("tımam", "tamam");
+Expect("işlvli", "işlevli");
+Expect("düzltmiyo", "düzeltmiyo"); // günlük dil "-yo" korunur
+Expect("düzeltmey", "düzeltmeye");
+Expect("futuristik", null);
+Expect("düzeltmiyo", null);        // günlük dil biçimi tanınır
+Expect("yapıyom", null);
+
+Console.WriteLine("\nYazım kuralları (TDK)");
+Expect("diyip", "deyip");
+Expect("bunuda", "bunu da");
+Expect("dediki", "dedi ki");
+Expect("Herşey", "Her şey");
+Expect("herşeyi", "her şeyi");
+Expect("yanlızca", "yalnızca");
+Expect("yada", "ya da");
+Expect("evde", null);
+Expect("sende", null);
+Expect("belki", null);
+Expect("mademki", null);
+
 Console.WriteLine("\nTürkçe karakter tamamlama");
 Expect("calisiyorum", "çalışıyorum");
 Expect("nasilsin", "nasılsın");
@@ -78,8 +100,14 @@ Expect("temam", "team", LanguageMode.English); // yalnızca İngilizce: İngiliz
 Expect("recieve", null, LanguageMode.Turkish);
 
 Console.WriteLine("\nÖğrenme");
-corrector.Learn("temam");
-Expect("temam", null);
+corrector.Reject("merhab");             // ilk geri alma: yalnızca bu oturum
+Expect("merhab", null);
+Console.WriteLine(corrector.LearnedWords(["merhab"]).Length == 0 ? "  ok  ilk geri almada kalıcı öğrenilmedi" : "HATA ilk geri almada öğrenildi");
+if (corrector.LearnedWords(["merhab"]).Length != 0) failed++;
+corrector.Reject("merhab");             // ikinci kez: kalıcı
+if (corrector.LearnedWords(["merhab"]).Length != 1) { failed++; Console.WriteLine("HATA ikinci geri almada öğrenilmedi"); } else Console.WriteLine("  ok  ikinci geri almada öğrenildi");
+corrector.ClearLearned();
+Expect("merhab", "merhaba");
 
 // Hız: kelime bitince (boşluk) yapılan tek arama ne kadar sürüyor?
 string[] words = ["temam", "calisiyorum", "gelyorum", "evlerimizden", "recieve", "merhaba", "bilgisayarlarımızdan", "xqzvbn"];
