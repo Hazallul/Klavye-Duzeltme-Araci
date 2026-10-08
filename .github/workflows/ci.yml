@@ -1,0 +1,26 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  build-test:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Uygulamayı derle
+        run: dotnet build src/Duzeltici -c Release
+
+      - name: Testleri derle
+        run: dotnet build tests/Duzeltici.Tests -c Release
+
+      # Düzeltme motoru testleri ve hız ölçümü. Uçtan uca test (--e2e) gerçek bir masaüstü
+      # ve çalışan uygulama istediği için yalnızca yerelde çalıştırılır.
+      - name: Motor testleri
+        run: dotnet tests/Duzeltici.Tests/bin/Release/net10.0-windows/Duzeltici.Tests.dll
