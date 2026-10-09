@@ -51,7 +51,23 @@ public sealed class WordTable
         }
     }
 
-    public static WordTable Load(string path, Lang lang)
+    public delegate void Visitor(ReadOnlySpan<byte> word, int logFrequency);
+
+    /// <summary>Tüm kelimeleri dolaşır (ek istatistiği çıkarmak için, başlangıçta bir kez).</summary>
+    public void ForEach(Visitor visit)
+    {
+        int at = 0;
+        while (at < _blob.Length)
+        {
+            int n = _blob[at];
+            visit(_blob.AsSpan(at + 2, n), _blob[at + 1]);
+            at += n + 2;
+        }
+    }
+
+    /// <param name="skip">Ölçüm için: bu kelimeler yüklenmez ("sözlükte olmayan ama doğru" kelimeleri
+    /// taklit etmek için). Uygulamada null.</param>
+    public static WordTable Load(string path, Lang lang, Func<string, bool>? skip = null)
     {
         byte[] text = File.ReadAllBytes(path);
         int lines = text.AsSpan().Count((byte)'\n') + 1;
@@ -75,6 +91,7 @@ public sealed class WordTable
             if (!long.TryParse(line[(space + 1)..].TrimEnd((byte)'\r'), out long freq) || freq <= 0) continue;
 
             total += freq;
+            if (skip != null && skip(new string(chars[..n]))) continue;
             var word = codes[..n];
             byte q = (byte)Math.Clamp(Math.Round(Math.Log(freq) * 16), 0, 255);
 

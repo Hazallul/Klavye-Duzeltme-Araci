@@ -59,6 +59,27 @@ public static class Alphabet
     public static char Char(byte code) => Letters[code];
 
     public static bool Adjacent(byte a, byte b) => s_adjacent[a * Size + b];
+    /// <summary>Sert ünsüzler (ç f h k p s ş t): ardından gelen ek "-da" değil "-ta" olur.</summary>
+    public static bool IsVoiceless(byte code) => Letters[code] is 'ç' or 'f' or 'h' or 'k' or 'p' or 's' or 'ş' or 't';
+
+    /// <summary>Türkçe kelimede üç ünsüz yan yana gelmez ("işlvli", "düzltmiyo"); sözlükte olmayan böyle bir
+    /// kelime neredeyse kesin bir yazım hatasıdır. (Sözlükteki alıntılar — ekstra, kontrol — zaten bilinir.)</summary>
+    public static bool ViolatesTurkishPhonotactics(ReadOnlySpan<byte> word)
+    {
+        int run = 0;
+        foreach (byte b in word)
+        {
+            run = IsVowel(b) ? 0 : run + 1;
+            if (run >= 3) return true;
+        }
+        return false;
+    }
+
+    /// <summary>Türkçe sözcüklerde bulunmayan harfler (q, w, x): kelime yabancı ya da teknik demektir.</summary>
+    public static bool IsForeign(byte code) => Letters[code] is 'q' or 'w' or 'x';
+
+    public static bool IsDotPair(byte a, byte b) => (Letters[a], Letters[b]) is ('ı', 'i') or ('i', 'ı');
+
     public static bool IsVowel(byte code) => Letters[code] is 'a' or 'e' or 'ı' or 'i' or 'o' or 'ö' or 'u' or 'ü' or 'â' or 'î' or 'û';
     public static byte TurkishTwin(byte code) => s_turkishTwin[code];
     public static byte AsciiTwin(byte code) => s_asciiTwin[code];

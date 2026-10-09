@@ -1,0 +1,29 @@
+# Asla düzeltilmeyen kelimeler: dosya uzantıları, teknik terimler, kısaltmalar, sohbet dili.
+# Sözlükte olmadıkları için "yazım hatası" sanılıp en yakın sık kelimeye (exe → eve) çevrilebilirler.
+# Bu liste yalnızca "dokunma" demektir; bu kelimeler başka kelimelerin düzeltmesi olarak önerilmez.
+# Satır başına bir kelime, küçük harfle. # ile başlayan satırlar açıklamadır.
+
+# dosya uzantıları
+exe dll msi bat cmd ps1 sh lnk iso img apk ipa jar war
+pdf doc docx xls xlsx ppt pptx odt rtf txt csv tsv md log ini cfg conf toml yaml yml json xml
+html htm css scss js jsx ts tsx mjs cjs vue svelte php py ipynb rb go rs java kt kts swift dart cs cpp hpp
+sql db sqlite env lock gradle pom
+png jpg jpeg gif svg webp bmp ico tif tiff heic psd ai fig sketch
+mp3 mp4 wav flac ogg m4a avi mkv mov webm
+zip rar tar gz tgz bz2 xz
+
+# teknik terimler ve araçlar
+api apis url urls uri http https www ssh ftp sftp tcp udp ip ipv dns cdn vpn lan wan wifi usb hdmi ssd hdd ram cpu gpu os ui ux
+sdk ide cli gui npm npx pnpm yarn pip git github gitlab repo repos commit commits push pull merge rebase branch diff
+jdk jre jvm maven kotlin flutter react angular nextjs nodejs node deno bun vite webpack docker kubernetes kubectl
+nginx redis kafka mysql postgres postgresql mongodb mongo jwt oauth sso cors crud rest graphql grpc json yaml
+backend frontend fullstack devops localhost login logout admin config debug deploy build test tests dev prod
+windows linux macos ubuntu android ios iphone ipad chrome firefox edge safari opera vscode intellij antigravity
+claude chatgpt gemini copilot openai anthropic google youtube whatsapp instagram twitter tiktok spotify discord
+netflix linkedin telegram zoom teams slack notion figma excel word powerpoint outlook gmail hotmail
+spring boot java python javascript typescript csharp dotnet net
+
+# kısaltmalar ve sohbet dili
+ok okey lol omg btw thx pls plz dm vs vb vd mrb slm nbr tmm tşk tsk tşkler eyw eyv kib knk dk sn sa as
+ing tr en abd ab tbmm tdk yks kpss ales yds aöf odtü itü boğaziçi
+kanka abi abla hocam bro aynen valla vallahi hadi hade haha hahaha ahah ehe hmm hm off of ya yaa yani işte

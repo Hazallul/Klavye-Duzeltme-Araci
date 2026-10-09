@@ -42,6 +42,9 @@ internal static unsafe class KeyboardHook
     static readonly char[] s_word = new char[MaxWord];
     static int s_len;
     static bool s_dirty;  // kelimede rakam/sembol var ya da başı bilinmiyor → dokunma
+    // Cümle ortasında büyük harfle başlayan bilinmeyen kelime bir isimdir (Hazal); düzeltilmez.
+    // Odak değişince (yeni bir alan) cümle başı sayılır.
+    static bool s_sentenceStart = true, s_wordAtSentenceStart = true;
     static bool s_joined; // boşluksuz bir ayraçtan sonra başladı: site.com, ad@posta, Ankara'ya
     static nint s_window;
     static bool s_skipWindow;
@@ -261,7 +264,11 @@ internal static unsafe class KeyboardHook
         if (char.IsLetter(ch))
         {
             s_undoTyped = null;
-            if (s_len == 0) StartProbe();
+            if (s_len == 0)
+            {
+                StartProbe();
+                s_wordAtSentenceStart = s_sentenceStart;
+            }
             if (s_len < MaxWord) s_word[s_len++] = ch;
             else s_dirty = true;
             UpdateMouseHook();
@@ -282,13 +289,18 @@ internal static unsafe class KeyboardHook
         if (allowFix && ch != '(' && (ch != '\n' || CorrectOnEnter) && s_len >= MinWordLength && !s_dirty && !s_joined)
         {
             string typed = new(s_word, 0, s_len);
-            string? fix = corrector.Suggest(typed);
+            string? fix = corrector.Suggest(typed, s_wordAtSentenceStart);
             if (fix != null && !ForegroundApp.FocusIsPassword(window)) // yalnızca düzeltme varken sor
             {
                 QueueFix(typed, fix, k, canUndo: ch != '\n');
                 swallow = true;
             }
         }
+
+        // Cümle sonu (. ! ? Enter) sonraki kelimeyi cümle başı yapar; boşluk durumu değiştirmez
+        // ("Merhaba. Nasılsın": nokta, sonra boşluk, sonra cümle başı).
+        bool sentenceEnd = ch is '.' or '!' or '?' or '\n';
+        if (s_len > 0 || sentenceEnd) s_sentenceStart = sentenceEnd;
 
         s_len = 0;
         s_wordProbe = 0;
@@ -500,6 +512,7 @@ internal static unsafe class KeyboardHook
     {
         s_len = 0;
         s_wordProbe = 0; // odak değişmiş olabilir; cevap artık geçersiz
+        s_sentenceStart = true;
         s_dirty = s_joined = false;
         s_undoTyped = s_undoFixed = null;
         if (updateMouseHook) UpdateMouseHook();

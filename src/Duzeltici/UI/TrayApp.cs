@@ -28,6 +28,14 @@ internal sealed class TrayApp : ApplicationContext
         _ui = SynchronizationContext.Current!;
         Settings = AppSettings.Load();
         foreach (var word in AppSettings.LoadLearned()) _corrector.Learn(word);
+        try
+        {
+            _corrector.LoadProtected(Path.Combine(AppContext.BaseDirectory, "Data", "korunan.txt"));
+        }
+        catch (Exception ex)
+        {
+            Log.Error(ex); // liste yoksa yalnızca koruma eksik kalır, uygulama çalışır
+        }
 
         KeyboardHook.Corrector = _corrector;
         KeyboardHook.Corrected += OnCorrected;
@@ -93,25 +101,28 @@ internal sealed class TrayApp : ApplicationContext
         UpdateTray();
         Task.Run(() =>
         {
-            var tables = new List<(Lang, WordTable)>();
+            var tables = new List<(Lang, WordTable, Morphology)>();
             try
             {
                 foreach (var lang in needed)
                 {
                     string file = Path.Combine(AppContext.BaseDirectory, "Data", lang == Lang.Tr ? "tr.txt" : "en.txt");
-                    tables.Add((lang, WordTable.Load(file, lang)));
+                    var table = WordTable.Load(file, lang);
+                    tables.Add((lang, table, Corrector.BuildMorphology(lang, table)));
                 }
             }
             catch (Exception ex)
             {
                 Log.Error(ex);
             }
-            // Dosya okuma tamponlarını (~8 MB) hemen geri ver; uygulama günlerce açık kalacak.
+            // Dosya okuma tamponlarını ve ek istatistiğinin geçici sayım tablosunu (onlarca MB) hemen
+            // işletim sistemine geri ver; uygulama günlerce açık kalacak. Aggressive: boş bellek bölgelerini
+            // de bırakır, normal toplama onları sonraki ayırmalar için elde tutar.
             GCSettings.LargeObjectHeapCompactionMode = GCLargeObjectHeapCompactionMode.CompactOnce;
-            GC.Collect();
+            GC.Collect(GC.MaxGeneration, GCCollectionMode.Aggressive, blocking: true, compacting: true);
             _ui.Post(_ =>
             {
-                foreach (var (lang, table) in tables) _corrector.SetTable(lang, table);
+                foreach (var (lang, table, morphology) in tables) _corrector.SetTable(lang, table, morphology);
                 _loading = false;
                 UpdateHook();
                 UpdateTray();

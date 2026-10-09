@@ -2,3 +2,8 @@ bin/
 obj/
 .vs/
 *.user
+
+# yerel çalıştırma kopyası ve kısayollar
+publish/
+*.lnk
+Baslat.bat
